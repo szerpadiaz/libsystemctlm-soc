@@ -42,51 +42,24 @@ class xilinx_zynqmp
 {
 private:
 
-	remoteport_tlm_memory_master rp_lpd_reserved;
+	remoteport_tlm_memory_master rp_data;
 	remoteport_tlm_wires rp_wires_in;
 	remoteport_tlm_wires rp_wires_out;
 	remoteport_tlm_wires rp_irq_out;
 
 public:
-	/*
-	 * HPM0 - 1 _FPD.
-	 * These sockets represent the High speed PS to PL interfaces.
-	 * These are AXI Slave ports on the PS side and AXI Master ports
-	 * on the PL side.
-	 *
-	 * HPM_LPD
-	 * Used to transfer data quickly from the LPD to the PL.
-	 *
-	 * Used to transfer data from the PS to the PL.
+	/* A socket to access (read/write) data from the PS to the PL.
 	 */
-	tlm_utils::simple_initiator_socket<remoteport_tlm_memory_master> *s_lpd_reserved;
+	tlm_utils::simple_initiator_socket<remoteport_tlm_memory_master> *s_data;
 
 	/*
-	 * HPC0 - 1.
-	 * These sockets represent the High speed IO Coherent PL to PS
-	 * interfaces.
-	 *
-	 * HP0 - 3.
-	 * These sockets represent the High speed PL to PS interfaces.
-	 *
-	 * PL_LPD
-	 * Low-Power interface used to transfer data to the Low Power Domain.
-	 *
-	 * ACP
-	 * Accelerator Coherency Port, used to transfered coherent data to
-	 * the PS via the Cortex-A53 subsystem.
-	 *
-	 * These are AXI Master ports on the PS side and AXI Slave ports
-	 * on the PL side.
-	 *
-	 * Used to transfer data from the PL to the PS.
+	 * The interrupt-signals
 	 */
 	sc_vector<sc_signal<bool> > pl2ps_irq;
 	sc_vector<sc_signal<bool> > ps2pl_irq;
 
 	/*
-	 * 4 PL resets, same as EMIO[2][31:28] but with friendly names.
-	 * See the TRM, Chapter 27 GPIO, page 761.
+	 * The reset signals
 	 */
 	sc_vector<sc_signal<bool> > pl_resetn;
 

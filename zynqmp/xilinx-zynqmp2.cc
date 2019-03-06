@@ -41,7 +41,7 @@ extern "C" {
 #include "remote-port-proto.h"
 #include "remote-port-sk.h"
 };
-#include "xilinx-zynqmp.h"
+#include "xilinx-zynqmp2.h"
 #include "tlm-extensions/genattr.h"
 #include <sys/types.h>
 
@@ -49,7 +49,7 @@ xilinx_zynqmp::xilinx_zynqmp(sc_module_name name, const char *sk_descr,
 				Iremoteport_tlm_sync *sync)
 	: remoteport_tlm(name, -1, sk_descr, sync),
 
-	  rp_lpd_reserved("rp_lpd_reserved"),
+	  rp_data("rp_lpd_reserved"),
 	  rp_wires_in("wires_in", 16, 0),
 	  rp_wires_out("wires_out", 0, 4),
 	  rp_irq_out("irq_out", 0, 164),
@@ -59,7 +59,7 @@ xilinx_zynqmp::xilinx_zynqmp(sc_module_name name, const char *sk_descr,
 {
 	unsigned int i;
 
-	s_lpd_reserved = &rp_lpd_reserved.sk;
+	s_data = &rp_data.sk;
 
 	for (i = 0; i < 16; i++) {
 		rp_wires_in.wires_in[i](pl2ps_irq[i]);
@@ -73,7 +73,7 @@ xilinx_zynqmp::xilinx_zynqmp(sc_module_name name, const char *sk_descr,
 	register_dev(0, &rp_wires_in);
 	register_dev(1, &rp_wires_out);
 	register_dev(2, &rp_irq_out);
-	register_dev(3, &rp_lpd_reserved);
+	register_dev(3, &rp_data);
 }
 
 void xilinx_zynqmp::tie_off(void)
