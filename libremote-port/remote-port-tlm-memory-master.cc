@@ -56,7 +56,7 @@ sc_time remoteport_tlm_memory_master::rp_bus_access(struct rp_pkt &pkt,
 	sc_time delay;
 	genattr_extension *genattr;
 
-	adaptor->sync->pre_memory_master_cmd(pkt.sync.timestamp, can_sync);
+	adaptor->sync->pre_memory_master_cmd(pkt.busaccess.timestamp, can_sync);
 	delay = adaptor->sync->get_local_time();
 	assert(pkt.busaccess.width == 0);
 
@@ -109,13 +109,13 @@ void remoteport_tlm_memory_master::cmd_read(struct rp_pkt &pkt, bool can_sync)
 	delay = rp_bus_access(lpkt, can_sync, tlm::TLM_READ_COMMAND,
 			      data, lpkt.busaccess.len);
 
-	in.clk = adaptor->rp_map_time(delay);
-	in.clk += lpkt.busaccess.timestamp;
+	in.clk = adaptor->rp_map_time(adaptor->sync->get_current_time());
+	//in.clk += lpkt.busaccess.timestamp;
 	plen = rp_encode_busaccess(&adaptor->peer,
 				   &pkt_tx.pkt->busaccess_ext_base,
 				   &in);
 	adaptor->rp_write(pkt_tx.pkt, plen);
-	adaptor->sync->post_memory_master_cmd(pkt.sync.timestamp, can_sync);
+	adaptor->sync->post_memory_master_cmd(pkt.busaccess.timestamp, can_sync);
 }
 
 void remoteport_tlm_memory_master::cmd_write(struct rp_pkt &pkt, bool can_sync,
@@ -132,8 +132,8 @@ void remoteport_tlm_memory_master::cmd_write(struct rp_pkt &pkt, bool can_sync,
 
 	if (!(lpkt.hdr.flags & RP_PKT_FLAGS_posted)) {
 		rp_encode_busaccess_in_rsp_init(&in, &lpkt);
-		in.clk = adaptor->rp_map_time(delay);
-		in.clk += lpkt.busaccess.timestamp;
+		in.clk = adaptor->rp_map_time(adaptor->sync->get_current_time());
+		//in.clk += lpkt.busaccess.timestamp;
 
 		plen = rp_encode_busaccess(&adaptor->peer,
 					   &pkt_tx.pkt->busaccess_ext_base,
