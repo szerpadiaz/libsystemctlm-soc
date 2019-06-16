@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
+#if 0
 #include "systemc.h"
 
 #include "tlm_utils/simple_initiator_socket.h"
@@ -157,3 +157,4 @@ public:
 	~xilinx_zynqmp(void);
 	void tie_off(void);
 };
+#endif

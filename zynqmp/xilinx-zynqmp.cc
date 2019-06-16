@@ -26,7 +26,7 @@
  */
 
 #define SC_INCLUDE_DYNAMIC_PROCESSES
-
+#if 0
 #include <inttypes.h>
 
 #include "tlm_utils/simple_initiator_socket.h"
@@ -276,3 +276,4 @@ void xilinx_zynqmp::b_transport(int id,
 unsigned int xilinx_zynqmp::transport_dbg(int id, tlm::tlm_generic_payload& trans) {
 	return proxy_out[id]->transport_dbg(trans);
 }
+#endif
