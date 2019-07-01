@@ -172,6 +172,11 @@ private:
 	unsigned char *pktbuf_data;
 	/* Socket.  */
 	int fd;
+	/* shared memory*/
+    int64_t clks[2];
+    int64_t *shData;
+    int shmid;
+
 
 	sc_process_handle adaptor_proc;
 
@@ -179,6 +184,8 @@ private:
 	void rp_cmd_hello(struct rp_pkt &pkt);
 	void rp_cmd_sync(struct rp_pkt &pkt, bool can_sync);
 	void process(void);
+	int createShm(void);
+	void update_clocks(void);
 };
 
 // Pre-defined sync objects.

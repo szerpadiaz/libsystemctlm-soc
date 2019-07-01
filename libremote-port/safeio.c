@@ -54,14 +54,31 @@ rp_safe_read(int fd, void *rbuf, size_t count)
 	size_t rlen = 0;
 	unsigned char *buf = rbuf;
 
-	do {
-		if ((r = read(fd, buf + rlen, count - rlen)) < 0) {
+	//return immediately if no data is available
+	r = read(fd, buf + rlen, count - rlen);
+	if(r < 0 && errno == EAGAIN)
+	{
+		return 0;
+	}
+	rlen += r;
+
+	while ((rlen < count) && r)
+	{
+
+		if ((r = read(fd, buf + rlen, count - rlen)) < 0)
+		{
 			if (errno == EINTR)
+			{
 				continue;
+			}
+			else if (errno == EAGAIN)
+			{
+				continue;
+			}
 			return -1;
 		}
 		rlen += r;
-	} while (rlen < count && r);
+	}
 
 	return rlen;
 }

@@ -27,6 +27,8 @@
 
 #include <inttypes.h>
 #include <sys/utsname.h>
+#include <sys/shm.h>
+#include <sys/ipc.h>
 
 #include "systemc.h"
 #include "tlm_utils/simple_initiator_socket.h"
@@ -38,6 +40,7 @@ extern "C" {
 #include "safeio.h"
 #include "remote-port-proto.h"
 #include "remote-port-sk.h"
+#include <fcntl.h>
 };
 #include "remote-port-tlm.h"
 
@@ -351,9 +354,18 @@ void remoteport_tlm::tie_off(void)
 
 ssize_t remoteport_tlm::rp_read(void *rbuf, size_t count)
 {
-	ssize_t r;
+	ssize_t r = 0;
 
-	r = rp_safe_read(fd, rbuf, count);
+	//While no-data is available, update clocks and sync.
+	//That is to avoid SystemC stay behind the remote side.
+	//The idea is not to use anymore the sync-commands before and after commands.
+	while(r == 0)
+	{
+		update_clocks();
+		r = rp_safe_read(fd, rbuf, count);
+	}
+	//fprintf(stderr, "RP READ: r = %d \n", (int)r);
+
 	if (r < (ssize_t)count) {
 		if (r < 0)
 			perror(__func__);
@@ -416,7 +428,7 @@ void remoteport_tlm::rp_cmd_sync(struct rp_pkt &pkt, bool can_sync)
         int64_t clk;
 	remoteport_packet pkt_tx;
 
-	sync->pre_sync_cmd(pkt.sync.timestamp, can_sync);
+	//sync->pre_sync_cmd(pkt.sync.timestamp, can_sync);
 
 	clk = sync->map_time(sync->get_current_time());
 	plen = rp_encode_sync_resp(pkt.hdr.id,
@@ -424,7 +436,7 @@ void remoteport_tlm::rp_cmd_sync(struct rp_pkt &pkt, bool can_sync)
 				   clk);
 	rp_write(pkt_tx.pkt, plen);
 
-	sync->post_sync_cmd(pkt.sync.timestamp, can_sync);
+	//sync->post_sync_cmd(pkt.sync.timestamp, can_sync);
 }
 
 bool remoteport_tlm::rp_process(bool can_sync)
@@ -434,6 +446,7 @@ bool remoteport_tlm::rp_process(bool can_sync)
 
 	pkt_rx.alloc(sizeof(pkt_rx.pkt->hdr) + 128);
 	while (1) {
+		//update_clocks();
 		remoteport_tlm_dev *dev;
 		unsigned char *data;
 		uint32_t dlen;
@@ -529,14 +542,74 @@ void remoteport_tlm::process(void)
 		}
 	}
 
+	//Modify the file status flags, to allow non-blocking reads
+	int flags = fcntl(fd, F_GETFL) | O_NONBLOCK;
+	fcntl(fd, F_SETFL, flags);
+
 	sync->reset();
 	wait(rst.negedge_event());
 
 	rp_say_hello();
+	createShm();
 
 	while (1) {
+
 		rp_process(true);
 	}
 	sync->sync();
 	return;
+}
+
+int remoteport_tlm::createShm(void)
+{
+	shmid = -1;
+    // 1. Generate unique Keys for shared memory
+	//		- The path to a file the both processes can read
+	//		- An arbitrary id to generate a unique key
+    char *fileName = new char[strlen(sk_descr) - strlen("unix:") + 1];
+    strncpy(fileName, sk_descr + strlen("unix:"),(strlen(sk_descr) - strlen("unix:") + 1));
+	const int id = 'M';
+    key_t key = ftok(fileName,id);
+    if(key == -1){
+        perror("Unable to create shared-memory's key \n");
+        return -1;
+    }
+
+    //2. Get identifier for shared memory
+    size_t shmSize = sizeof(clks);
+    int shmPermissions = 0666|IPC_CREAT;
+    shmid = shmget(key, shmSize, shmPermissions);
+    if(shmid == -1){
+        perror("Unable to create shared-memory's shmid \n");
+        return -1;
+    }
+
+    //3.  Attach to shared memory to get a pointer to it
+    shData = (int64_t*) shmat(shmid, (void*)0, 0);
+    if(shData == (int64_t*)(-1)){
+        perror("%s: Unable to attached to shared-memory \n");
+        return -1;
+    }
+
+    fprintf(stderr, "CREATED SHARED MEMORY: %d (%d)\n", shmid, (int)shmSize);
+    return 0;
+}
+
+void remoteport_tlm::update_clocks(void)
+{
+    int64_t lclk =  sync->map_time(sync->get_current_time());
+    int64_t rclk;
+
+    rclk = shData[0];
+    shData[1] = lclk;
+
+    //clks[1] = lclk;
+    //clks[0] = rclk;
+
+    if(lclk < rclk)
+    {
+        sync->pre_sync_cmd(rclk,true);
+        sync->post_sync_cmd(rclk,true);
+        //fprintf(stderr, "(lclk,rclk) = (%ld,%ld) \n", lclk, rclk);
+    }
 }
