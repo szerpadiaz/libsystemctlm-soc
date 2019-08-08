@@ -168,7 +168,9 @@ public:
 	}
 
 	virtual void pre_sync_cmd(int64_t rclk, bool can_sync) {
-		account_time(rclk);
+		if (can_sync) {
+			account_time(rclk);
+		}
 	}
 
 	virtual void post_sync_cmd(int64_t rclk, bool can_sync) {
@@ -333,7 +335,11 @@ unsigned int remoteport_tlm_dev::response_wait(uint32_t id)
 		// event to wake us up once the RP thread has
 		// received our response.
 		if (adaptor->current_process_is_adaptor()) {
+#ifdef WALLCLOCK_SYNC_EN
 			adaptor->rp_process(false);
+#else
+			adaptor->rp_process(true);
+#endif
 		} else {
 			wait(resp[i].ev);
 		}
@@ -367,15 +373,16 @@ ssize_t remoteport_tlm::rp_read(void *rbuf, size_t count)
 {
 	ssize_t r = 0;
 
-	//While no-data is available, update clocks and sync.
-	//That is to avoid SystemC stay behind the remote side.
-	//The idea is not to use anymore the sync-commands before and after commands.
 	while(r == 0)
 	{
+#ifdef WALLCLOCK_SYNC_EN
+		//While no-data is available, update clocks and sync.
+		//That is to avoid SystemC stay behind the remote side.
+		//The idea is not to use anymore the sync-commands before and after commands.
 		update_clocks();
+#endif
 		r = rp_safe_read(fd, rbuf, count);
 	}
-	//fprintf(stderr, "RP READ: r = %d \n", (int)r);
 
 	if (r < (ssize_t)count) {
 		if (r < 0)
@@ -439,7 +446,7 @@ void remoteport_tlm::rp_cmd_sync(struct rp_pkt &pkt, bool can_sync)
         int64_t clk;
 	remoteport_packet pkt_tx;
 
-	//sync->pre_sync_cmd(pkt.sync.timestamp, can_sync);
+	sync->pre_sync_cmd(pkt.sync.timestamp, can_sync);
 
 	clk = sync->map_time(sync->get_current_time());
 	plen = rp_encode_sync_resp(pkt.hdr.id,
@@ -447,7 +454,7 @@ void remoteport_tlm::rp_cmd_sync(struct rp_pkt &pkt, bool can_sync)
 				   clk);
 	rp_write(pkt_tx.pkt, plen);
 
-	//sync->post_sync_cmd(pkt.sync.timestamp, can_sync);
+	sync->post_sync_cmd(pkt.sync.timestamp, can_sync);
 }
 
 bool remoteport_tlm::rp_process(bool can_sync)
@@ -457,7 +464,6 @@ bool remoteport_tlm::rp_process(bool can_sync)
 
 	pkt_rx.alloc(sizeof(pkt_rx.pkt->hdr) + 128);
 	while (1) {
-		//update_clocks();
 		remoteport_tlm_dev *dev;
 		unsigned char *data;
 		uint32_t dlen;
@@ -565,7 +571,12 @@ void remoteport_tlm::process(void)
 
 	while (1) {
 
+#ifdef WALLCLOCK_SYNC_EN
 		rp_process(false);
+#else
+		rp_process(true);
+#endif
+
 	}
 	sync->sync();
 	return;
@@ -608,11 +619,12 @@ int remoteport_tlm::createShm(void)
 
 void remoteport_tlm::update_clocks(void)
 {
-    int64_t lclk =  shData[1];
+    int64_t lclk = shData[1];
     int64_t rclk = shData[0];
 
     if(lclk < rclk)
     {
+    	//Find out the next delta to advance the SystemC simulation
     	int64_t delta_ns = rclk - lclk;
 		sc_time delta = sc_time(delta_ns, SC_NS);
 		sc_time q = sync->get_global_quantum();
@@ -622,7 +634,7 @@ void remoteport_tlm::update_clocks(void)
 			delta = q;
 		}
 
-		// Never allow the local time to go beyond the global quantum, cap it.
+		//Never allow to advance local time beyond the global quantum
 		if (sync->get_local_time() + delta > q)
 		{
 			sync->set_local_time(q);
@@ -632,6 +644,7 @@ void remoteport_tlm::update_clocks(void)
 			sync->inc_local_time(delta);
 		}
 
+		//Advance the SystemC simulation
 		sync->sync();
 		shData[1] = sync->map_time(sync->get_current_time());
     }

@@ -27,6 +27,8 @@ extern "C" {
 #include "remote-port-proto.h"
 };
 
+#define WALLCLOCK_SYNC_EN
+
 class remoteport_packet {
 public:
 	union {
