@@ -112,6 +112,10 @@ public:
 	}
 
 	// Limited access to quantum keeper.
+	virtual sc_core::sc_time get_global_quantum() {
+		return m_qk.get_global_quantum();
+	}
+
 	virtual sc_core::sc_time get_current_time() {
 		return m_qk.get_current_time();
 	}
@@ -132,6 +136,9 @@ public:
 		m_qk.reset();
 	}
 
+	virtual bool need_sync() {
+		return m_qk.need_sync();
+	}
 	virtual void sync(void) {
 		m_qk.sync();
 	}
@@ -200,7 +207,9 @@ public:
 	}
 
 	virtual void pre_memory_master_cmd(int64_t rclk, bool can_sync) {
-		account_time(rclk);
+		if (can_sync) {
+			account_time(rclk);
+		}
 		if (can_sync && m_qk.need_sync()) {
 			m_qk.sync();
 		}
@@ -252,7 +261,9 @@ remoteport_tlm::remoteport_tlm(sc_module_name name,
 	this->fd = fd;
 	this->sk_descr = sk_descr;
 	this->rp_pkt_id = 0;
-
+	this->shmid =  -1;
+	this->paused = false;
+	this->shData = nullptr;
 	this->sync = sync;
 	if (!this->sync) {
 		// Default
@@ -322,7 +333,7 @@ unsigned int remoteport_tlm_dev::response_wait(uint32_t id)
 		// event to wake us up once the RP thread has
 		// received our response.
 		if (adaptor->current_process_is_adaptor()) {
-			adaptor->rp_process(true);
+			adaptor->rp_process(false);
 		} else {
 			wait(resp[i].ev);
 		}
@@ -554,7 +565,7 @@ void remoteport_tlm::process(void)
 
 	while (1) {
 
-		rp_process(true);
+		rp_process(false);
 	}
 	sync->sync();
 	return;
@@ -590,26 +601,38 @@ int remoteport_tlm::createShm(void)
         perror("%s: Unable to attached to shared-memory \n");
         return -1;
     }
+    paused = false;
 
-    fprintf(stderr, "CREATED SHARED MEMORY: %d (%d)\n", shmid, (int)shmSize);
     return 0;
 }
 
 void remoteport_tlm::update_clocks(void)
 {
-    int64_t lclk =  sync->map_time(sync->get_current_time());
-    int64_t rclk;
-
-    rclk = shData[0];
-    shData[1] = lclk;
-
-    //clks[1] = lclk;
-    //clks[0] = rclk;
+    int64_t lclk =  shData[1];
+    int64_t rclk = shData[0];
 
     if(lclk < rclk)
     {
-        sync->pre_sync_cmd(rclk,true);
-        sync->post_sync_cmd(rclk,true);
-        //fprintf(stderr, "(lclk,rclk) = (%ld,%ld) \n", lclk, rclk);
+    	int64_t delta_ns = rclk - lclk;
+		sc_time delta = sc_time(delta_ns, SC_NS);
+		sc_time q = sync->get_global_quantum();
+
+		if (delta > q)
+		{
+			delta = q;
+		}
+
+		// Never allow the local time to go beyond the global quantum, cap it.
+		if (sync->get_local_time() + delta > q)
+		{
+			sync->set_local_time(q);
+		}
+		else
+		{
+			sync->inc_local_time(delta);
+		}
+
+		sync->sync();
+		shData[1] = sync->map_time(sync->get_current_time());
     }
 }

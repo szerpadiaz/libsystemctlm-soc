@@ -113,6 +113,7 @@ public:
 	}
 
 	// Limited direct access to quantum keeper.
+	virtual sc_core::sc_time get_global_quantum() = 0;
 	virtual sc_core::sc_time get_current_time() = 0;
 	virtual sc_core::sc_time get_local_time() = 0;
 
@@ -120,6 +121,7 @@ public:
 	virtual void inc_local_time(sc_core::sc_time t) = 0;
 	virtual void sync(void) = 0;
 	virtual void reset(void) = 0;
+	virtual bool need_sync(void) = 0;
 
 	// Account peer time through some implementation specific quantum keeper.
 	virtual void account_time(int64_t rclk) = 0;
@@ -175,6 +177,7 @@ private:
 	/* shared memory*/
     int64_t clks[2];
     int64_t *shData;
+    bool paused;
     int shmid;
 
 
