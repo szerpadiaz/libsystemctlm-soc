@@ -263,9 +263,7 @@ remoteport_tlm::remoteport_tlm(sc_module_name name,
 	this->fd = fd;
 	this->sk_descr = sk_descr;
 	this->rp_pkt_id = 0;
-	this->shmid =  -1;
 	this->paused = false;
-	this->shData = nullptr;
 	this->sync = sync;
 	if (!this->sync) {
 		// Default
@@ -371,18 +369,19 @@ void remoteport_tlm::tie_off(void)
 
 ssize_t remoteport_tlm::rp_read(void *rbuf, size_t count)
 {
-	ssize_t r = 0;
+	ssize_t r;
 
-	while(r == 0)
-	{
 #ifdef WALLCLOCK_SYNC_EN
-		//While no-data is available, update clocks and sync.
-		//That is to avoid SystemC stay behind the remote side.
-		//The idea is not to use anymore the sync-commands before and after commands.
-		update_clocks();
+	//While no-data is available, synchronize the wall-clocks.
+	do
+	{
+		rp_sync_wallclocks();
+		r = rp_safe_read_nb(fd, rbuf, count);
+	}while(r == 0);
+#else
+	//Block until data is available
+	r = rp_safe_read(fd, rbuf, count);
 #endif
-		r = rp_safe_read(fd, rbuf, count);
-	}
 
 	if (r < (ssize_t)count) {
 		if (r < 0)
@@ -567,7 +566,7 @@ void remoteport_tlm::process(void)
 	wait(rst.negedge_event());
 
 	rp_say_hello();
-	createShm();
+	rp_sync_createSharedWallclocks();
 
 	while (1) {
 
@@ -582,14 +581,14 @@ void remoteport_tlm::process(void)
 	return;
 }
 
-int remoteport_tlm::createShm(void)
+int remoteport_tlm::rp_sync_createSharedWallclocks(void)
 {
-	shmid = -1;
+    char *fileName = new char[strlen(sk_descr) - strlen("unix:") + 1];
+    strncpy(fileName, sk_descr + strlen("unix:"),(strlen(sk_descr) - strlen("unix:") + 1));
+
     // 1. Generate unique Keys for shared memory
 	//		- The path to a file the both processes can read
 	//		- An arbitrary id to generate a unique key
-    char *fileName = new char[strlen(sk_descr) - strlen("unix:") + 1];
-    strncpy(fileName, sk_descr + strlen("unix:"),(strlen(sk_descr) - strlen("unix:") + 1));
 	const int id = 'M';
     key_t key = ftok(fileName,id);
     if(key == -1){
@@ -598,30 +597,35 @@ int remoteport_tlm::createShm(void)
     }
 
     //2. Get identifier for shared memory
-    size_t shmSize = sizeof(clks);
+    size_t shmSize = sizeof(*lclk) + sizeof(*rclk);
     int shmPermissions = 0666|IPC_CREAT;
-    shmid = shmget(key, shmSize, shmPermissions);
+    int shmid = shmget(key, shmSize, shmPermissions);
     if(shmid == -1){
         perror("Unable to create shared-memory's shmid \n");
         return -1;
     }
 
     //3.  Attach to shared memory to get a pointer to it
-    shData = (int64_t*) shmat(shmid, (void*)0, 0);
+    int64_t* shData = (int64_t*) shmat(shmid, (void*)0, 0);
     if(shData == (int64_t*)(-1)){
         perror("%s: Unable to attached to shared-memory \n");
         return -1;
     }
-    paused = false;
 
-    return 0;
+    //4. Map shared memory to wallclocks
+    lclk = &shData[1];
+    rclk = &shData[0];
+
+    return shmid;
 }
 
-void remoteport_tlm::update_clocks(void)
+void remoteport_tlm::rp_sync_wallclocks(void)
 {
-    int64_t lclk = shData[1];
-    int64_t rclk = shData[0];
+	//Current shared wall-clocks
+	int64_t lclk = *(this->lclk);
+	int64_t rclk = *(this->rclk);
 
+	//Advance time, only it SystemC is behind the remote side.
     if(lclk < rclk)
     {
     	//Find out the next delta to advance the SystemC simulation
@@ -646,6 +650,8 @@ void remoteport_tlm::update_clocks(void)
 
 		//Advance the SystemC simulation
 		sync->sync();
-		shData[1] = sync->map_time(sync->get_current_time());
+
+		//Update shared wall-clock with local time
+	    *(this->lclk) = sync->map_time(sync->get_current_time());
     }
 }

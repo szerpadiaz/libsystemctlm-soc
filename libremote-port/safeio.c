@@ -48,7 +48,7 @@ long splice(int fd_in, off_t *off_in, int fd_out,
 #endif
 
 ssize_t
-rp_safe_read(int fd, void *rbuf, size_t count)
+rp_safe_read_nb(int fd, void *rbuf, size_t count)
 {
 	ssize_t r;
 	size_t rlen = 0;
@@ -81,6 +81,25 @@ rp_safe_read(int fd, void *rbuf, size_t count)
 	}
 
 	return rlen;
+}
+
+ssize_t
+rp_safe_read(int fd, void *rbuf, size_t count)
+{
+    ssize_t r;
+    size_t rlen = 0;
+    unsigned char *buf = rbuf;
+
+    do {
+        if ((r = read(fd, buf + rlen, count - rlen)) < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        rlen += r;
+    } while (rlen < count && r);
+
+    return rlen;
 }
 
 ssize_t

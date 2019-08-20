@@ -176,12 +176,10 @@ private:
 	unsigned char *pktbuf_data;
 	/* Socket.  */
 	int fd;
-	/* shared memory*/
-    int64_t clks[2];
-    int64_t *shData;
+	/* Shared wall-clock sync*/
+	int64_t *lclk;
+	int64_t *rclk;
     bool paused;
-    int shmid;
-
 
 	sc_process_handle adaptor_proc;
 
@@ -189,8 +187,8 @@ private:
 	void rp_cmd_hello(struct rp_pkt &pkt);
 	void rp_cmd_sync(struct rp_pkt &pkt, bool can_sync);
 	void process(void);
-	int createShm(void);
-	void update_clocks(void);
+	int  rp_sync_createSharedWallclocks(void);
+	void rp_sync_wallclocks(void);
 };
 
 // Pre-defined sync objects.
