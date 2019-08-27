@@ -263,7 +263,7 @@ remoteport_tlm::remoteport_tlm(sc_module_name name,
 	this->fd = fd;
 	this->sk_descr = sk_descr;
 	this->rp_pkt_id = 0;
-	this->paused = false;
+
 	this->sync = sync;
 	if (!this->sync) {
 		// Default
@@ -333,7 +333,7 @@ unsigned int remoteport_tlm_dev::response_wait(uint32_t id)
 		// event to wake us up once the RP thread has
 		// received our response.
 		if (adaptor->current_process_is_adaptor()) {
-#ifdef WALLCLOCK_SYNC_EN
+#ifdef SH_CLK_EN
 			adaptor->rp_process(false);
 #else
 			adaptor->rp_process(true);
@@ -371,11 +371,11 @@ ssize_t remoteport_tlm::rp_read(void *rbuf, size_t count)
 {
 	ssize_t r;
 
-#ifdef WALLCLOCK_SYNC_EN
-	//While no-data is available, synchronize the wall-clocks.
+#ifdef SH_CLK_EN
+	//While no-data is available, synchronize the shared clocks.
 	do
 	{
-		rp_sync_wallclocks();
+		sharedClk.sync();
 		r = rp_safe_read_nb(fd, rbuf, count);
 	}while(r == 0);
 #else
@@ -558,41 +558,52 @@ void remoteport_tlm::process(void)
 		}
 	}
 
-	//Modify the file status flags, to allow non-blocking reads
+#ifdef SH_CLK_EN
+	//Modify socket to allow non-blocking reads
 	int flags = fcntl(fd, F_GETFL) | O_NONBLOCK;
 	fcntl(fd, F_SETFL, flags);
 
+	//Get shared memory descriptor
+    char *shMem_descr = new char[strlen(sk_descr) - strlen("unix:") + 1];
+    strncpy(shMem_descr, sk_descr + strlen("unix:"),(strlen(sk_descr) - strlen("unix:") + 1));
+
+    //Init shared clocks
+    int shmid = sharedClk.init(shMem_descr);
+    if(shmid == -1) {
+    	printf("Failed to create remote-port shared clocks!\n");
+		exit(EXIT_FAILURE);
+		return;
+    }
+#else
 	sync->reset();
+#endif
+
 	wait(rst.negedge_event());
-
 	rp_say_hello();
-	rp_sync_createSharedWallclocks();
 
-	while (1) {
-
-#ifdef WALLCLOCK_SYNC_EN
+	while (1)
+	{
+#ifdef SH_CLK_EN
 		rp_process(false);
 #else
 		rp_process(true);
 #endif
 
 	}
+#ifndef SH_CLK_EN
 	sync->sync();
+#endif
 	return;
 }
 
-int remoteport_tlm::rp_sync_createSharedWallclocks(void)
+int remoteport_tlm_sharedClock::init(char *fileName)
 {
-    char *fileName = new char[strlen(sk_descr) - strlen("unix:") + 1];
-    strncpy(fileName, sk_descr + strlen("unix:"),(strlen(sk_descr) - strlen("unix:") + 1));
-
     // 1. Generate unique Keys for shared memory
 	//		- The path to a file the both processes can read
 	//		- An arbitrary id to generate a unique key
 	const int id = 'M';
     key_t key = ftok(fileName,id);
     if(key == -1){
-        perror("Unable to create shared-memory's key \n");
         return -1;
     }
 
@@ -601,27 +612,28 @@ int remoteport_tlm::rp_sync_createSharedWallclocks(void)
     int shmPermissions = 0666|IPC_CREAT;
     int shmid = shmget(key, shmSize, shmPermissions);
     if(shmid == -1){
-        perror("Unable to create shared-memory's shmid \n");
         return -1;
     }
 
     //3.  Attach to shared memory to get a pointer to it
     int64_t* shData = (int64_t*) shmat(shmid, (void*)0, 0);
     if(shData == (int64_t*)(-1)){
-        perror("%s: Unable to attached to shared-memory \n");
         return -1;
     }
 
-    //4. Map shared memory to wallclocks
+    //4. Map shared memory to clocks
     lclk = &shData[1];
     rclk = &shData[0];
+
+    //5. init synchronization elements
+    m_qk.reset();
 
     return shmid;
 }
 
-void remoteport_tlm::rp_sync_wallclocks(void)
+void remoteport_tlm_sharedClock::sync(void)
 {
-	//Current shared wall-clocks
+	//Current shared clocks
 	int64_t lclk = *(this->lclk);
 	int64_t rclk = *(this->rclk);
 
@@ -631,7 +643,7 @@ void remoteport_tlm::rp_sync_wallclocks(void)
     	//Find out the next delta to advance the SystemC simulation
     	int64_t delta_ns = rclk - lclk;
 		sc_time delta = sc_time(delta_ns, SC_NS);
-		sc_time q = sync->get_global_quantum();
+		sc_time q = m_qk.get_global_quantum();
 
 		if (delta > q)
 		{
@@ -639,19 +651,19 @@ void remoteport_tlm::rp_sync_wallclocks(void)
 		}
 
 		//Never allow to advance local time beyond the global quantum
-		if (sync->get_local_time() + delta > q)
+		if (m_qk.get_local_time() + delta > q)
 		{
-			sync->set_local_time(q);
+			m_qk.set(q);
 		}
 		else
 		{
-			sync->inc_local_time(delta);
+			m_qk.inc(delta);
 		}
 
 		//Advance the SystemC simulation
-		sync->sync();
+		m_qk.sync();
 
-		//Update shared wall-clock with local time
-	    *(this->lclk) = sync->map_time(sync->get_current_time());
+		//Update shared clock with local time
+	    *(this->lclk) = map_time(m_qk.get_current_time());
     }
 }

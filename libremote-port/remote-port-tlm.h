@@ -139,6 +139,33 @@ public:
 	virtual void post_memory_master_cmd(int64_t rclk, bool can_sync) { }
 };
 
+class remoteport_tlm_sharedClock
+{
+public:
+	remoteport_tlm_sharedClock() {
+		lclk = nullptr;
+		rclk = nullptr;
+	};
+	int init(char *fileName);
+	void sync();
+private:
+	int64_t *lclk;
+	int64_t *rclk;
+
+	int64_t map_time(sc_time t){
+		sc_time tr, tmp;
+		double dtr;
+
+		tr = sc_get_time_resolution();
+		dtr = tr.to_seconds() * 1000 * 1000 * 1000;
+
+		tmp = t * dtr;
+		return tmp.value();
+	};
+protected:
+	tlm_utils::tlm_quantumkeeper m_qk;
+};
+
 #define RP_MAX_DEVS 512
 
 class remoteport_tlm
@@ -160,6 +187,7 @@ public:
 	struct rp_peer_state peer;
 	uint32_t rp_pkt_id;
 	Iremoteport_tlm_sync *sync;
+	remoteport_tlm_sharedClock sharedClk;
 
 	bool rp_process(bool sync);
 	ssize_t rp_read(void *rbuf, size_t count);
@@ -176,19 +204,12 @@ private:
 	unsigned char *pktbuf_data;
 	/* Socket.  */
 	int fd;
-	/* Shared wall-clock sync*/
-	int64_t *lclk;
-	int64_t *rclk;
-    bool paused;
-
 	sc_process_handle adaptor_proc;
 
 	void rp_say_hello(void);
 	void rp_cmd_hello(struct rp_pkt &pkt);
 	void rp_cmd_sync(struct rp_pkt &pkt, bool can_sync);
 	void process(void);
-	int  rp_sync_createSharedWallclocks(void);
-	void rp_sync_wallclocks(void);
 };
 
 // Pre-defined sync objects.
